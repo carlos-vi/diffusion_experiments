@@ -8,7 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-from tinymnist.model import UNet
+from tinymnist.device import DEVICE
+from tinymnist.model import load_model
 from tinymnist.sampling import ddim_sample, ddpm_sample
 from tinymnist.schedule import Schedule
 from tinymnist.viz import show_grid
@@ -17,10 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--out", default="results")
 args = parser.parse_args()
 
-sched = Schedule()
-model = UNet()
-model.load_state_dict(torch.load(f"{args.out}/model.pt"))
-model.eval()
+sched = Schedule(device=DEVICE)
+model = load_model(args.out, DEVICE)
 
 runs = [(f"DDIM {s} steps", lambda s=s: ddim_sample(model, sched, 12, steps=s, guidance=0))
         for s in (3, 5, 10, 25, 50)]
@@ -30,6 +29,8 @@ fig, axes = plt.subplots(len(runs), 1, figsize=(8, 1.5 * len(runs)))
 for ax, (name, fn) in zip(axes, runs):
     start = time.time()
     x = fn()
+    if DEVICE.type == "cuda":
+        torch.cuda.synchronize()  # GPU calls are asynchronous; wait so the timing is real
     secs = time.time() - start
     print(f"{name:16s} {secs:6.1f} s for 12 images")
     show_grid(ax, x, nrow=12)

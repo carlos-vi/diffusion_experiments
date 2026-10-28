@@ -16,36 +16,46 @@ import torch
 import torch.nn.functional as F
 
 from tinymnist.data import load_mnist, to_model_range
-from tinymnist.model import NULL_LABEL, UNet
+from tinymnist.device import DEVICE
+from tinymnist.model import NULL_LABEL, UNet, save_config
 from tinymnist.schedule import Schedule
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--steps", type=int, default=5000, help="use e.g. 300 for a quick smoke test")
-parser.add_argument("--batch", type=int, default=128)
+parser.add_argument("--batch", type=int, default=128, help="on a GPU try 256 or 512")
 parser.add_argument("--lr", type=float, default=2e-3)
+parser.add_argument("--base", type=int, default=16, help="U-Net width, a multiple of 8 (16 = 100k params, 64 = 1.4M)")
+parser.add_argument("--attn", action="store_true", help="add self-attention in the 7x7 bottleneck")
+parser.add_argument("--amp", action="store_true", help="mixed precision (fp16), GPU only; faster and lighter")
 parser.add_argument("--out", default="results")
 args = parser.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
 torch.manual_seed(0)
-sched = Schedule()
-images, labels = load_mnist()
-model = UNet()
+sched = Schedule(device=DEVICE)
+images, labels = (t.to(DEVICE) for t in load_mnist())  # 47 MB of uint8, so it fits on the GPU
+config = dict(base=args.base, attn=args.attn)
+model = UNet(**config).to(DEVICE)
+save_config(args.out, **config)
 ema = copy.deepcopy(model)  # a slowly-moving average of the weights; it gives cleaner samples
-print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+print(f"Device: {DEVICE}   Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 lr_sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.steps)
+use_amp = args.amp and DEVICE.type == "cuda"
+scaler = torch.amp.GradScaler(DEVICE.type, enabled=use_amp)
 
 losses = []
 start = time.time()
 for step in range(1, args.steps + 1):
-    idx = torch.randint(0, len(images), (args.batch,))
+    idx = torch.randint(0, len(images), (args.batch,), device=DEVICE)
     x0, y = to_model_range(images[idx]), labels[idx].clone()
-    y[torch.rand(args.batch) < 0.1] = NULL_LABEL        # drop the label 10% of the time
-    t = torch.randint(0, sched.T, (args.batch,))
+    y[torch.rand(args.batch, device=DEVICE) < 0.1] = NULL_LABEL        # drop the label 10% of the time
+    t = torch.randint(0, sched.T, (args.batch,), device=DEVICE)
     xt, noise = sched.q_sample(x0, t)
-    loss = F.mse_loss(model(xt, t, y), noise)
-    opt.zero_grad(); loss.backward(); opt.step(); lr_sched.step()
+    with torch.autocast(DEVICE.type, dtype=torch.float16, enabled=use_amp):
+        pred = model(xt, t, y)
+    loss = F.mse_loss(pred.float(), noise)
+    opt.zero_grad(); scaler.scale(loss).backward(); scaler.step(opt); scaler.update(); lr_sched.step()
     with torch.no_grad():
         decay = min(0.995, (1 + step) / (10 + step))
         for pe, p in zip(ema.parameters(), model.parameters()):

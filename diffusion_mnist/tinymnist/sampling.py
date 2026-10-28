@@ -10,10 +10,11 @@ def predict_eps(model, x, t, labels, guidance):
 
     Classifier-free guidance:  eps = eps_uncond + w * (eps_cond - eps_uncond).
     """
-    tt = torch.full((len(x),), int(t), dtype=torch.long)
-    null = torch.full((len(x),), NULL_LABEL, dtype=torch.long)
+    tt = torch.full((len(x),), int(t), dtype=torch.long, device=x.device)
+    null = torch.full((len(x),), NULL_LABEL, dtype=torch.long, device=x.device)
     if labels is None or guidance == 0:
         return model(x, tt, null)
+    labels = labels.to(x.device)
     if guidance == 1:
         return model(x, tt, labels)
     both = model(torch.cat([x, x]), torch.cat([tt, tt]), torch.cat([null, labels]))
@@ -23,16 +24,20 @@ def predict_eps(model, x, t, labels, guidance):
 
 @torch.no_grad()
 def ddpm_sample(model, sched, n, labels=None, guidance=1.0, seed=0, keep_every=0):
-    """Ancestral sampling: T stochastic steps. Optionally keeps snapshots of x_t."""
+    """Ancestral sampling: T stochastic steps. Optionally keeps snapshots of x_t.
+
+    The noise is drawn on the CPU and then moved, so a seed gives the same digits on CPU and GPU.
+    """
+    device = next(model.parameters()).device
     g = torch.Generator().manual_seed(seed)
-    x = torch.randn(n, 1, 28, 28, generator=g)
+    x = torch.randn(n, 1, 28, 28, generator=g).to(device)
     snaps = [x.clone()] if keep_every else None
     for t in reversed(range(sched.T)):
         eps = predict_eps(model, x, t, labels, guidance)
         a, ab, b = sched.alphas[t], sched.alpha_bars[t], sched.betas[t]
         x = (x - b / (1.0 - ab).sqrt() * eps) / a.sqrt()
         if t > 0:
-            x = x + sched.posterior_var[t].sqrt() * torch.randn(x.shape, generator=g)
+            x = x + sched.posterior_var[t].sqrt() * torch.randn(x.shape, generator=g).to(device)
         if keep_every and (t % keep_every == 0 or t == 0):
             snaps.append(x.clone())
     return (x, snaps) if keep_every else x
@@ -41,14 +46,15 @@ def ddpm_sample(model, sched, n, labels=None, guidance=1.0, seed=0, keep_every=0
 @torch.no_grad()
 def ddim_sample(model, sched, n, steps=50, labels=None, guidance=1.0, seed=0):
     """Deterministic DDIM sampling with only `steps` network evaluations."""
+    device = next(model.parameters()).device
     g = torch.Generator().manual_seed(seed)
-    x = torch.randn(n, 1, 28, 28, generator=g)
-    ts = torch.linspace(sched.T - 1, 0, steps).round().long()
+    x = torch.randn(n, 1, 28, 28, generator=g).to(device)
+    ts = torch.linspace(sched.T - 1, 0, steps).round().long().tolist()
     for i, t in enumerate(ts):
-        eps = predict_eps(model, x, int(t), labels, guidance)
+        eps = predict_eps(model, x, t, labels, guidance)
         ab = sched.alpha_bars[t]
         x0 = ((x - (1.0 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)  # guess of the clean image
         eps = (x - ab.sqrt() * x0) / (1.0 - ab).sqrt()  # noise consistent with the clamped guess
-        ab_prev = sched.alpha_bars[ts[i + 1]] if i + 1 < len(ts) else torch.tensor(1.0)
+        ab_prev = sched.alpha_bars[ts[i + 1]] if i + 1 < len(ts) else torch.ones((), device=device)
         x = ab_prev.sqrt() * x0 + (1.0 - ab_prev).sqrt() * eps
     return x

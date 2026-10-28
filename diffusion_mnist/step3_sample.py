@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 import torch
 
-from tinymnist.model import UNet
+from tinymnist.device import DEVICE
+from tinymnist.model import load_model
 from tinymnist.sampling import ddpm_sample
 from tinymnist.schedule import Schedule
 from tinymnist.viz import show_grid
@@ -17,10 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--out", default="results")
 args = parser.parse_args()
 
-sched = Schedule()
-model = UNet()
-model.load_state_dict(torch.load(f"{args.out}/model.pt"))
-model.eval()
+sched = Schedule(device=DEVICE)
+model = load_model(args.out, DEVICE)
 
 # No label (guidance 0): the model invents digits on its own.
 samples, snaps = ddpm_sample(model, sched, n=64, labels=None, guidance=0, keep_every=10)
@@ -52,7 +51,7 @@ from torchvision.utils import make_grid
 
 def update(i):
     i = min(i, len(frames) - 1)
-    image.set_data(make_grid(to_display_range(frames[i]), nrow=3, padding=1, pad_value=1.0)[0].numpy())
+    image.set_data(make_grid(to_display_range(frames[i].cpu()), nrow=3, padding=1, pad_value=1.0)[0].numpy())
     title.set_text(f"Denoising: t = {max(sched.T - i * 20, 0)}")
     return image, title
 

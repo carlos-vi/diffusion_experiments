@@ -22,17 +22,17 @@ class Classifier(nn.Module):
         return self.net(x)
 
 
-def get_classifier(path):
+def get_classifier(path, device="cpu"):
     """Loads the classifier from `path`, training it for one epoch first if it does not exist."""
-    clf = Classifier()
+    clf = Classifier().to(device)
     if os.path.exists(path):
-        clf.load_state_dict(torch.load(path))
+        clf.load_state_dict(torch.load(path, map_location=device))
         return clf.eval()
-    images, labels = load_mnist(train=True)
-    test_images, test_labels = load_mnist(train=False)
+    images, labels = (t.to(device) for t in load_mnist(train=True))
+    test_images, test_labels = (t.to(device) for t in load_mnist(train=False))
     opt = torch.optim.Adam(clf.parameters(), lr=2e-3)
     torch.manual_seed(0)
-    perm = torch.randperm(len(images))
+    perm = torch.randperm(len(images), device=device)
     for i in range(0, len(images), 128):
         idx = perm[i:i + 128]
         loss = F.cross_entropy(clf(to_model_range(images[idx])), labels[idx])

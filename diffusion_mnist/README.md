@@ -32,6 +32,35 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install numpy matplotlib pillow
 ```
 
+## Run it on a free GPU
+
+The code uses the GPU automatically when PyTorch can see one, and the CPU otherwise. The images are
+only 47 MB, so what limits a bigger model is GPU memory (VRAM), not RAM. Free options (limits change, check each site):
+
+| Platform | GPU | Notes |
+|---|---|---|
+| [Kaggle Notebooks](https://www.kaggle.com/code) | P100 16 GB or 2x T4 | About 30 GPU hours per week, long sessions. Needs a verified phone number. |
+| [Google Colab](https://colab.research.google.com) | T4 16 GB | Shorter sessions, GPU not guaranteed. Can save to Google Drive. |
+| [Lightning AI Studios](https://lightning.ai) | T4 and others | Monthly free credits. |
+
+Open [`colab_kaggle.ipynb`](colab_kaggle.ipynb) there (upload it, or open it from GitHub), turn on a GPU and run the cells.
+Or, in any terminal with a GPU:
+
+```bash
+python run_all.py --steps 20000 --base 64 --attn --batch 256 --amp
+```
+
+| Option of `step2_train.py` | Effect |
+|---|---|
+| `--base N` | U-Net width, a multiple of 8. 16 (default) is 100k parameters, 32 is 370k, 64 is 1.4M, 96 is 3.3M (with `--attn`). |
+| `--attn` | Adds self-attention in the 7x7 bottleneck. |
+| `--batch N` | Batch size; a GPU handles 256 or 512 easily. |
+| `--amp` | Mixed precision (fp16): faster and uses less VRAM. Ignored on CPU. |
+
+The chosen architecture is saved in `results/model_config.json`, so steps 3 to 5 rebuild the same network
+(a `model.pt` without that file is the default small one). The sampling noise is drawn on the CPU and then moved,
+so the same seed gives the same starting noise on CPU and GPU.
+
 ## What is different from the 2D version
 
 - The network is a small U-Net (convolutions, down- and up-sampling, skip connections) instead of an MLP.
@@ -83,7 +112,7 @@ ambiguous. That is expected, and a bigger network or longer training would impro
 ## Things to try
 
 - Train with `--steps 1000` and `--steps 10000` and compare the digits.
-- Change the width of the U-Net (`base` in `tinymnist/model.py`).
+- Change the width of the U-Net (`--base` in `step2_train.py`) and add `--attn`.
 - Try guidance values between 0 and 3 in `step5_guidance.py`.
 
 ## Layout
@@ -92,9 +121,12 @@ ambiguous. That is expected, and a bigger network or longer training would impro
 tinymnist/
   data.py        MNIST loading
   schedule.py    noise schedule and forward process
-  model.py       time- and label-conditioned U-Net
+  device.py      picks the GPU if there is one, else the CPU
+  model.py       time- and label-conditioned U-Net (configurable width, optional attention)
   sampling.py    DDPM and DDIM samplers, with classifier-free guidance
   classifier.py  small classifier used only to evaluate step 5
 step1..step5     one script per stage
-run_all.py       runs them all
+run_all.py       runs them all (extra options go to step2_train.py)
+colab_kaggle.ipynb  notebook to run everything on a free Kaggle / Colab GPU (extra options go to step2_train.py)
+colab_kaggle.ipynb  notebook to run everything on a free Kaggle / Colab GPU
 ```

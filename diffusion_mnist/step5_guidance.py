@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 import torch
 
 from tinymnist.classifier import get_classifier
-from tinymnist.model import UNet
+from tinymnist.device import DEVICE
+from tinymnist.model import load_model
 from tinymnist.sampling import ddim_sample
 from tinymnist.schedule import Schedule
 from tinymnist.viz import show_grid
@@ -22,15 +23,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--out", default="results")
 args = parser.parse_args()
 
-sched = Schedule()
-model = UNet()
-model.load_state_dict(torch.load(f"{args.out}/model.pt"))
-model.eval()
-clf = get_classifier(f"{args.out}/classifier.pt")
+sched = Schedule(device=DEVICE)
+model = load_model(args.out, DEVICE)
+clf = get_classifier(f"{args.out}/classifier.pt", DEVICE)
 
 weights = [0, 1, 3, 6]
 per_digit = 6
-labels = torch.arange(10).repeat_interleave(per_digit)  # 0,0,0,0,0,0,1,1,...
+labels = torch.arange(10, device=DEVICE).repeat_interleave(per_digit)  # 0,0,0,0,0,0,1,1,...
 
 fig, axes = plt.subplots(1, len(weights), figsize=(3.6 * len(weights), 6.4))
 for ax, w in zip(axes, weights):
