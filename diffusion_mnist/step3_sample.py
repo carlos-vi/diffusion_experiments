@@ -7,7 +7,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 import torch
+from torchvision.utils import make_grid
 
+from tinymnist.data import to_display_range
 from tinymnist.device import DEVICE
 from tinymnist.model import load_model
 from tinymnist.sampling import ddpm_sample
@@ -45,8 +47,6 @@ frames = [s[:9] for s in snaps[::2]] + [snaps[-1][:9]]  # every 20th step, 3x3 d
 show_grid(ax, frames[0], nrow=3)
 image = ax.images[0]
 title = ax.set_title("")
-from tinymnist.data import to_display_range
-from torchvision.utils import make_grid
 
 
 def update(i):
